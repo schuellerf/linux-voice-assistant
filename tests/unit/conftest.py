@@ -69,6 +69,7 @@ def make_state(tmp_path=None, **overrides):
         "button_double_press_sound": "/sounds/double_press.flac",
         "button_triple_press_sound": "/sounds/triple_press.flac",
         "button_long_press_sound": "/sounds/long_press.flac",
+        "error_sound": "/sounds/error.flac",
         "preferences": Preferences(),
         "preferences_path": tmp_path / "preferences.json",
         "download_dir": tmp_path / "downloads",

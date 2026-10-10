@@ -22,9 +22,12 @@ Feedback events emitted by LVA
   tts_speaking
   tts_finished
   pipeline_error  data: {"reason": <str>}
-              Emitted when the voice pipeline reports an error (STT failure,
-              intent error, etc.). NOT emitted when HA disconnects — that
-              uses the separate ``disconnected`` event below.
+              Emitted when the voice pipeline fails after wake (STT/intent
+              error, HA disconnect mid-run, timeout waiting for HA, etc.).
+              ``reason`` may be ``pipeline_error``, ``ha_disconnected``,
+              ``timeout``, or an HA error code. LVA may also play
+              ``error_sound`` locally. ``disconnected`` is still emitted
+              separately when the HA TCP session ends.
               Peripheral containers should show a brief red error animation
               (e.g. 3 red flashes then off) and then return to idle.
   disconnected

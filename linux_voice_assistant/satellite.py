@@ -71,6 +71,8 @@ _LOGGER = logging.getLogger(__name__)
 
 PROTO_TO_MESSAGE_TYPE = {v: k for k, v in MESSAGE_TYPE_TO_PROTO.items()}
 
+PIPELINE_REQUEST_TIMEOUT_SECONDS = 25.0
+
 _HAS_AUDIO_DATA2 = "data2" in {f.name for f in VoiceAssistantAudio.DESCRIPTOR.fields}
 
 
@@ -351,6 +353,8 @@ class VoiceSatelliteProtocol(APIServer):
         self._timer_ring_start: Optional[float] = None
         self._processing = False
         self._pipeline_active = False
+        self._pipeline_fail_handled = False
+        self._pipeline_timeout_timer: Optional[threading.Timer] = None
         self._external_wake_words: Dict[str, VoiceAssistantExternalWakeWord] = {}
         self._disconnect_event = asyncio.Event()
 
@@ -568,6 +572,7 @@ class VoiceSatelliteProtocol(APIServer):
         _LOGGER.info("Voice event: type=%s, data=%s", event_type.name, data)
 
         if event_type == VoiceAssistantEventType.VOICE_ASSISTANT_RUN_START:
+            self._cancel_pipeline_timeout()
             self._tts_url = data.get("url")
             self._tts_played = False
             self._continue_conversation = False
@@ -616,6 +621,7 @@ class VoiceSatelliteProtocol(APIServer):
             self.play_tts()
 
         elif event_type == VoiceAssistantEventType.VOICE_ASSISTANT_RUN_END:
+            self._cancel_pipeline_timeout()
             self._is_streaming_audio = False
             if not self._tts_played:
                 self._pipeline_active = False
@@ -627,7 +633,8 @@ class VoiceSatelliteProtocol(APIServer):
             self._tts_played = False
 
         elif event_type == VoiceAssistantEventType.VOICE_ASSISTANT_ERROR:
-            self._emit(LVAEvent.PIPELINE_ERROR)
+            reason = data.get("code") or data.get("message") or "pipeline_error"
+            self._fail_pipeline(reason)
 
     # ------------------------------------------------------------------
     # Timer event handler
@@ -876,6 +883,73 @@ class VoiceSatelliteProtocol(APIServer):
             self.send_messages([VoiceAssistantAudio(data=audio_chunk)])
 
     # ------------------------------------------------------------------
+    # Pipeline failure feedback
+    # ------------------------------------------------------------------
+
+    def _cancel_pipeline_timeout(self) -> None:
+        if self._pipeline_timeout_timer is not None:
+            self._pipeline_timeout_timer.cancel()
+            self._pipeline_timeout_timer = None
+
+    def _start_pipeline_timeout(self) -> None:
+        self._cancel_pipeline_timeout()
+
+        def _on_timeout() -> None:
+            if self._pipeline_active and not self._tts_played:
+                self._fail_pipeline("timeout")
+
+        self._pipeline_timeout_timer = threading.Timer(PIPELINE_REQUEST_TIMEOUT_SECONDS, _on_timeout)
+        self._pipeline_timeout_timer.daemon = True
+        self._pipeline_timeout_timer.start()
+
+    def _fail_pipeline(self, reason: str, *, play_sound: bool = True) -> None:
+        """
+        Tear down an in-progress voice pipeline and optionally play the error chime.
+        :param reason: Reported to peripherals in ``pipeline_error``.
+        :param play_sound: When false, skip local error audio (state is still reset).
+        """
+        if self._pipeline_fail_handled:
+            return
+
+        self._pipeline_fail_handled = True
+        self._cancel_pipeline_timeout()
+        self._is_streaming_audio = False
+        self._pipeline_active = False
+        self._processing = False
+        self.state.stop_word.is_active = False  # type: ignore[attr-defined]
+
+        self._emit(LVAEvent.PIPELINE_ERROR, {"reason": reason})
+        _LOGGER.warning("Voice pipeline failed: %s", reason)
+
+        if play_sound and self.state.error_sound:
+            try:
+                self.state.tts_player.stop()
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Failed to stop TTS player before error sound")
+            self.unduck()
+            self.state.tts_player.play(self.state.error_sound, done_callback=self._on_error_sound_finished)
+        else:
+            self.unduck()
+            self._emit(LVAEvent.IDLE)
+
+    def _on_error_sound_finished(self) -> None:
+        self._emit(LVAEvent.IDLE)
+
+    def _begin_voice_request(self, wake_word_phrase: str) -> None:
+        """
+        Send ``VoiceAssistantRequest`` to Home Assistant and start listening.
+        :param wake_word_phrase: Wake phrase for HA, or empty for button-triggered runs.
+        """
+        if not self.state.connected:
+            self._fail_pipeline("ha_disconnected")
+            return
+
+        self.send_messages([VoiceAssistantRequest(start=True, wake_word_phrase=wake_word_phrase)])
+        self._is_streaming_audio = True
+        self._emit(LVAEvent.LISTENING)
+        self._start_pipeline_timeout()
+
+    # ------------------------------------------------------------------
     # Wake word / stop
     # ------------------------------------------------------------------
 
@@ -895,6 +969,7 @@ class VoiceSatelliteProtocol(APIServer):
         self._timer_finished = False
         self._timer_ring_start = None
         _LOGGER.debug("Stopping timer finished sound")
+        self._pipeline_fail_handled = False
         self._pipeline_active = True
         self._emit(LVAEvent.WAKE_WORD_DETECTED)
         self.duck()
@@ -914,9 +989,7 @@ class VoiceSatelliteProtocol(APIServer):
             "Starting audio streaming for: %s",
             wake_word_phrase,
         )
-        self.send_messages([VoiceAssistantRequest(start=True, wake_word_phrase=wake_word_phrase)])
-        self._is_streaming_audio = True
-        self._emit(LVAEvent.LISTENING)
+        self._begin_voice_request(wake_word_phrase)
 
     def _on_wakeup_sound_finished(self, wake_word_phrase: str) -> None:
         """Callback invoked when the wakeup chime finishes; begin STT streaming."""
@@ -924,9 +997,7 @@ class VoiceSatelliteProtocol(APIServer):
             "Wakeup sound finished, starting audio streaming for: %s",
             wake_word_phrase,
         )
-        self.send_messages([VoiceAssistantRequest(start=True, wake_word_phrase=wake_word_phrase)])
-        self._is_streaming_audio = True
-        self._emit(LVAEvent.LISTENING)
+        self._begin_voice_request(wake_word_phrase)
 
     def start_listening(self) -> None:
         """
@@ -948,6 +1019,7 @@ class VoiceSatelliteProtocol(APIServer):
         self._timer_finished = False
         self._timer_ring_start = None
         _LOGGER.debug("Stopping timer finished sound")
+        self._pipeline_fail_handled = False
         self._pipeline_active = True
         self.duck()
         self.state.tts_player.play(
@@ -958,11 +1030,10 @@ class VoiceSatelliteProtocol(APIServer):
     def _on_start_listening_sound_finished(self) -> None:
         """Callback invoked when the start-listening chime finishes; begin STT streaming."""
         _LOGGER.debug("Start-listening sound finished, starting audio streaming")
-        self.send_messages([VoiceAssistantRequest(start=True, wake_word_phrase="")])
-        self._is_streaming_audio = True
-        self._emit(LVAEvent.LISTENING)
+        self._begin_voice_request("")
 
     def stop(self) -> None:
+        self._cancel_pipeline_timeout()
         self.state.active_wake_words.discard(self.state.stop_word.id)
         self._pipeline_active = False
 
@@ -1016,6 +1087,7 @@ class VoiceSatelliteProtocol(APIServer):
                     return
                 self.send_messages([VoiceAssistantRequest(start=True)])
                 self._is_streaming_audio = True
+                self._start_pipeline_timeout()
                 _LOGGER.debug("Continued conversation started")
 
             threading.Timer(self.state.continue_conversation_delay, _start_continued_conversation).start()
@@ -1090,6 +1162,9 @@ class VoiceSatelliteProtocol(APIServer):
     # ------------------------------------------------------------------
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
+        pending_pipeline_error = self._pipeline_active and not self._tts_played
+        self._cancel_pipeline_timeout()
+
         idle_task = self._idle_task
         self._idle_task = None
         if idle_task is not None and not idle_task.done():
@@ -1119,10 +1194,13 @@ class VoiceSatelliteProtocol(APIServer):
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Failed to stop music player during disconnect")
 
-            try:
-                self.state.tts_player.stop()
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Failed to stop TTS player during disconnect")
+            if pending_pipeline_error and not self._pipeline_fail_handled:
+                self._fail_pipeline("ha_disconnected")
+            else:
+                try:
+                    self.state.tts_player.stop()
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Failed to stop TTS player during disconnect")
 
             self.state.stop_word.is_active = False  # type: ignore[attr-defined]
             self.state.connected = False

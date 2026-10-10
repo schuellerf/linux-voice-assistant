@@ -121,7 +121,7 @@ These are all the events LVA emits. Your peripheral script receives them and rea
 
 | Event | Data | Description |
 |-------|------|-------------|
-| `pipeline_error` | `{"reason": str}` | The voice pipeline failed — for example STT failure or an intent error. Show a brief red error animation (3 flashes, then off). NOT emitted when HA disconnects; see `disconnected` below. |
+| `pipeline_error` | `{"reason": str}` | The voice pipeline failed after wake (STT/intent error, `ha_disconnected`, `timeout`, etc.). LVA may play a local error chime. Show a brief red error animation (3 flashes, then off). `disconnected` is still emitted when the HA TCP session ends (use it for persistent "no connection" UI). |
 | `disconnected` | — | The TCP connection to Home Assistant was lost. Show a "no connection" animation and keep it until you see `zeroconf` with `status: connected`. Note: if LVA itself is not running, your client will see a WebSocket connection failure instead — treat that the same way. |
 | `muted` | `{"muted": bool}` | The microphone mute state changed. `true` = muted (show a muted indicator on your LEDs, e.g. red at mic positions), `false` = unmuted. Emitted on every transition in both directions, so peripherals can track mute state without inferring it from `idle`. |
 | `zeroconf` | `{"status": "getting_started" \| "connected"}` | Reports LVA's connection lifecycle. `getting_started` is emitted at startup before HA connects; `connected` is emitted once the HA TCP handshake completes. Use `connected` to clear a "no connection" animation. |

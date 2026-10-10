@@ -165,6 +165,11 @@ async def main() -> None:
         help="Sound to play for button long press",
     )
     parser.add_argument(
+        "--error-sound",
+        default=str(_SOUNDS_DIR / "error.flac"),
+        help="Sound when the voice pipeline fails after wake (empty string disables)",
+    )
+    parser.add_argument(
         "--preferences-file",
         default=_REPO_DIR / "preferences.json",
         help="Directory and file name for the preferences JSON file",
@@ -448,6 +453,7 @@ async def main() -> None:
         button_double_press_sound=args.button_double_press_sound,
         button_triple_press_sound=args.button_triple_press_sound,
         button_long_press_sound=args.button_long_press_sound,
+        error_sound=args.error_sound,
         preferences=preferences,
         preferences_path=preferences_path,
         refractory_seconds=args.refractory_seconds,

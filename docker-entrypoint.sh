@@ -108,6 +108,10 @@ if [ -n "${PROCESSING_SOUND}" ]; then
   EXTRA_ARGS+=( "--processing-sound" "$PROCESSING_SOUND" )
 fi
 
+if [ -n "${ERROR_SOUND}" ]; then
+  EXTRA_ARGS+=( "--error-sound" "$ERROR_SOUND" )
+fi
+
 if [ -n "${MUTE_SOUND}" ]; then
   EXTRA_ARGS+=( "--mute-sound" "$MUTE_SOUND" )
 fi

@@ -192,6 +192,7 @@ Environment=PREFERENCES_FILE="/home/pi/linux-voice-assistant/preferences.json"
 # Environment=START_LISTENING_SOUND="sounds/start_listening_button.flac"
 # Environment=TIMER_FINISHED_SOUND="sounds/timer_finished.flac"
 # Environment=PROCESSING_SOUND="sounds/processing.wav"
+# Environment=ERROR_SOUND="sounds/error.flac"
 # Environment=LISTEN_DURING_WAKE_SOUND="0"
 # Environment=MUTE_SOUND="sounds/mute_switch_on.flac"
 # Environment=UNMUTE_SOUND="sounds/mute_switch_off.flac"
@@ -286,6 +287,7 @@ The following variables can be configured in the `.env` or in the service file:
 | `START_LISTENING_SOUND` | `sounds/start_listening_button.flac` | Sound file for pressing button to talk |
 | `TIMER_FINISHED_SOUND` | `sounds/timer_finished.flac` | Sound file for timer finished |
 | `PROCESSING_SOUND` | `sounds/processing.wav` | Sound file for processing state |
+| `ERROR_SOUND` | `sounds/error.flac` | Sound when the voice pipeline fails after wake (set empty to disable) |
 | `LISTEN_DURING_WAKE_SOUND` | false | Set to "1" to start listening immediately after wake word detection, without waiting for the wake sound to finish |
 | `MUTE_SOUND` | `sounds/mute_switch_on.flac` | Sound file for mute on |
 | `UNMUTE_SOUND` | `sounds/mute_switch_off.flac` | Sound file for mute off |

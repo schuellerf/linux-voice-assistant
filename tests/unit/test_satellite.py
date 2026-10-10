@@ -3,7 +3,9 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from aioesphomeapi.model import VoiceAssistantEventType
 
+from linux_voice_assistant.peripheral_api import LVAEvent
 from tests.unit.conftest import make_satellite, make_state
 
 # ---------------------------------------------------------------------------
@@ -367,6 +369,54 @@ class TestConnectionLost:
         sat = make_satellite(tmp_path)
         sat.connection_lost(None)
         sat.state.tts_player.stop.assert_called()
+
+    def test_connection_lost_plays_error_sound_when_pipeline_active(self, tmp_path):
+        sat = make_satellite(tmp_path)
+        sat.state.connected = True
+        sat._pipeline_active = True
+        sat._tts_played = False
+        sat.connection_lost(None)
+        sat.state.tts_player.play.assert_called_once_with(
+            sat.state.error_sound,
+            done_callback=sat._on_error_sound_finished,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Pipeline failure / error sound
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineFailure:
+    def test_voice_assistant_error_plays_error_sound(self, tmp_path):
+        sat = make_satellite(tmp_path)
+        peripheral = MagicMock()
+        sat.state.peripheral_api = peripheral
+        sat._pipeline_active = True
+
+        sat.handle_voice_event(VoiceAssistantEventType.VOICE_ASSISTANT_ERROR, {"code": "stt_failed"})
+
+        assert sat._pipeline_active is False
+        sat.state.tts_player.play.assert_called_once_with(
+            sat.state.error_sound,
+            done_callback=sat._on_error_sound_finished,
+        )
+        peripheral.emit_event_sync.assert_called()
+        error_calls = [call for call in peripheral.emit_event_sync.call_args_list if call.args[0] == LVAEvent.PIPELINE_ERROR]
+        assert error_calls
+        assert error_calls[0].args[1] == {"reason": "stt_failed"}
+
+    def test_fail_pipeline_skipped_when_error_sound_empty(self, tmp_path):
+        sat = make_satellite(tmp_path, state_overrides={"error_sound": ""})
+        peripheral = MagicMock()
+        sat.state.peripheral_api = peripheral
+        sat._pipeline_active = True
+
+        sat.handle_voice_event(VoiceAssistantEventType.VOICE_ASSISTANT_ERROR, {})
+
+        sat.state.tts_player.play.assert_not_called()
+        idle_calls = [call for call in peripheral.emit_event_sync.call_args_list if call.args[0] == LVAEvent.IDLE]
+        assert idle_calls
 
 
 # ---------------------------------------------------------------------------

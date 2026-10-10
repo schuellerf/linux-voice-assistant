@@ -122,6 +122,7 @@ class ServerState:
     button_double_press_sound: str
     button_triple_press_sound: str
     button_long_press_sound: str
+    error_sound: str
     preferences: Preferences
     preferences_path: Path
     download_dir: Path
